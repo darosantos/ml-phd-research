@@ -19,8 +19,6 @@ https://numpy.org/doc/stable/reference/random/generator.html#numpy.random.defaul
 https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.choice.html#numpy.random.Generator.choice
 https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.integers.html#numpy.random.Generator.integers
 """
-from numba import jit
-
 from joblib import Parallel, delayed
 
 from threading import Lock
@@ -235,7 +233,6 @@ class RFClassifier(BaseEstimator):
         
         return est_base
 
-    @njit(nopython=True, nogil=True, parallel=True, fastmath=True)
     def _generate_sample_indices(self,
                                  seed,
                                  n_samples,
@@ -302,7 +299,6 @@ class RFClassifier(BaseEstimator):
  
         return sample_indices
 
-    #@njit(nopython=True, nogil=True, parallel=True, fastmath=True)
     def _get_sample_n_feature(self):
         """
         Until function.
@@ -329,7 +325,6 @@ class RFClassifier(BaseEstimator):
             return int(self._sample_n_feature * self._n_features)
         raise ValueError('Impossible determine to sample n feature.')
 
-    #@njit(cache=True, parallel=True, fastmath=True)
     def _calc_boostrap_size(self, size):
         """
         Until function.
@@ -344,7 +339,6 @@ class RFClassifier(BaseEstimator):
             return int(size*self._sample_bootstrap_size)
         raise ValueError('Impossible determine to size bootstrap.')
 
-    #@njit(cache=True, parallel=True, fastmath=True)
     def _get_sample_data(self, X, y):
         """
         Until function.
@@ -386,7 +380,6 @@ class RFClassifier(BaseEstimator):
         """
         return len(self._estimators) > 0
  
-    #@njit(cache=True, parallel=True, fastmath=True)   
     def _adapt_massive_inputs(self, X, y=None):
         """
         Until function.
@@ -429,7 +422,6 @@ class RFClassifier(BaseEstimator):
 
         return (Xt, yt)
 
-    #@njit(cache=True, parallel=True, fastmath=True)
     def _check_inputs(self, X, y):
         """
         Until function.
