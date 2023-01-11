@@ -56,7 +56,7 @@ class RFClassifier(BaseEstimator):
     """
     A simple alternative implementation of the Random Forest algorithm.
 
-    Based in the implementation of the SKLearn.
+    Based in to implementation from the SKLearn.
     """
 
     __slots__ = ['_base_estimator', '_estimators', '_n_estimators', '_params',
@@ -403,7 +403,11 @@ class RFClassifier(BaseEstimator):
             if (not(y is None)):
                 self._classes = np.unique(y)
                 self._n_classes = len(self._classes)
-                yt = np.array(y)
+                if isinstance(y, pd.core.series.Series):
+                    yt = y.to_numpy(copy=True)
+                else:
+                    if not(isinstance(y, np.ndarray)):
+                        yt = np.array(y)
         else:
             # verificar se é o mesmo x
             if np.shape(X)[1] != self._n_features:
