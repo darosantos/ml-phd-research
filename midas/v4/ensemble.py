@@ -28,7 +28,7 @@ import gc
 # from sklearn.ensemble import ForestClassifier
 # from sklearn.ensemble import BaseEnsemble
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import accuracy_score
 from sklearn.utils import parallel_backend
 
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     print('Project KTree Version: ', __version__)
 
 
-class RFClassifier(BaseEstimator):
+class RFClassifier(BaseEstimator, ClassifierMixin):
     """
     A simple alternative implementation of the Random Forest algorithm.
 

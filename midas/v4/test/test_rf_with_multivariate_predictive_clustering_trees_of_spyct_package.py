@@ -66,16 +66,46 @@ print(confusion_matrix(y_test, y_pred))
 
 accuracy_score(y_test, y_pred)
 
+from sklearn.datasets import load_iris
+
+# Load the iris dataset from scikit learn.
+dataset = load_iris()
+X = dataset.data
+y = dataset.target.reshape(-1, 1)
+
+
+# Split the data into train and test subsets.
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# For multi-class datasets, target needs to be one-hot encoded.
+encoder = OneHotEncoder()
+y_train = encoder.fit_transform(y_train).toarray()
+
+# Fit the model and make predictions
+model = spyct.Model()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# decode the encoded predictions
+y_pred = np.argmax(y_pred, axis=1)
+
+# Show the confusion matrix
+print(confusion_matrix(y_test, y_pred))
+
+np.unique(y_train)
+
+y_pred
+
 """Testa com o RFClassifier"""
 
-cfg_base_estimator = {'splitter':'svm', # 'grad' or 'svm'
+cfg_base_estimator = {'splitter':'grad', # 'grad' or 'svm'
                       'num_trees': 100,
                       'max_features': 1.0, # int, float, "sqrt", "log"
                       'bootstrapping':None, # True or False
                       'max_depth': np.inf, # or int
                       'min_examples_to_split': 2,
                       'min_impurity_decrease': 0, # or float
-                      'n_jobs':-1, # 1
+                      'n_jobs':1, # 1
                       'standardize_descriptive': True,
                       'standardize_clustering': True,
                       'max_iter':100,
