@@ -19,6 +19,7 @@ https://numpy.org/doc/stable/reference/random/generator.html#numpy.random.defaul
 https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.choice.html#numpy.random.Generator.choice
 https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.integers.html#numpy.random.Generator.integers
 """
+
 from joblib import Parallel, delayed
 
 from threading import Lock
@@ -44,12 +45,31 @@ from os import cpu_count
 
 import logging
 
+from stats import get_sample_data
+from util import get_instance_of_class, call_method_from_instance
+from util import get_n_jobs
+from util import CfgParallelBackend
+from util import adapt_massive_inputs
+from util import estimator_is_fitted
+
 VERSION = (0, 0, 4)
 
 __version__ = ".".join(map(str, VERSION))
 
 if __name__ == "__main__":
     print('Project KTree Version: ', __version__)
+
+# ---------------- GLOBAL VARIABLE ----------------
+
+if not ("CFG_PARALLEL" in globals()):
+    CFG_PARALLEL = CfgParallelBackend()
+
+if not ("NODE_ENSEMBLE" in globals()):
+    NODE_ENSEMBLE = {'estimator': object, 'feature_name': [],
+                     'instances_train': []}
+
+
+# -------------------- Classes --------------------
 
 
 class RFClassifier(BaseEstimator, ClassifierMixin):
@@ -379,7 +399,7 @@ class RFClassifier(BaseEstimator, ClassifierMixin):
         Return boolean if this classifier is fitted.
         """
         return len(self._estimators) > 0
- 
+
     def _adapt_massive_inputs(self, X, y=None):
         """
         Until function.
@@ -471,7 +491,7 @@ class RFClassifier(BaseEstimator, ClassifierMixin):
         self._parallel_backend = parallel_backend
         self._parallel_prefer = parallel_prefer
         self._parallel_require = parallel_require
-        
+
     def _get_n_jobs(self):
         """
         Util function.
@@ -659,4 +679,281 @@ class RFClassifier(BaseEstimator, ClassifierMixin):
             local_lock.acquire()
             self._datalogger.info(str(message))
             local_lock.release()
-        
+
+
+class BaseEnsembleTree(object):
+
+    __slots__ = ['classes_', 'n_classes_',
+                 'ensemble_', 'k_estimators_', 'feature_names_',
+                 'instances_train_',
+                 'bootstrap_size_', 'bootstrap_feature_size_',
+                 'sample_n_feature_', 'sample_strategy_', 'method_train_',
+                 'method_predict_', 'package_base_estimator_']
+
+    def __init__(self, **kwargs):
+        self.classes_ = None
+        self.n_classes_ = None
+        self.ensemble_ = []
+        self.k_estimators_ = []
+        self.feature_names_ = []
+        self.instances_train_ = []
+        self.bootstrap_size_ = kwargs.get('bootstrap_size', None)
+        self.bootstrap_feature_size_ = kwargs.get('bootstrap_feature_size', 'auto')
+        self.sample_n_feature_ = kwargs.get('sample_n_feature', 'sqrt-')
+        self.sample_strategy_ = kwargs.get('sample_strategy',
+                                           'numpy.random.Generator.integers')
+        self.package_base_estimator_ = kwargs.get('package_base_estimator_',
+                                                  'sklearn.tree')
+        self.method_train_ = kwargs.get('method_train', 'fit')
+        self.method_predict_ = kwargs.get('method_predict', 'predict')
+
+    def get_k_estimators(self, k='all'):
+        if str(k).lower() == 'all':
+            self.get_all_estimators_()
+        else:
+            raise ValueError('Not implemeted k extraction')
+
+    def get_all_estimators_(self):
+        global CFG_PARALLEL
+        flag_lock = Lock()
+        with flag_lock:
+            k_estimators = Parallel(**CFG_PARALLEL.get_all_options())(
+                                        delayed(lambda ei: ei['estimator'])(e)
+                                        for e in self.ensemble_)
+        return k_estimators
+
+    def match_features(self, index_estimator):
+        features_train_ = self.ensemble_[index_estimator]['feature_name']
+        name_features_train = [self.feature_names_[i] for i in features_train_]
+        return name_features_train
+
+    def get_classes(self):
+        """r
+        Util function.
+
+        Return n classes
+        """
+        return self.classes_
+
+    def set_classes(self, y, increment=False):
+        """
+        Util function.
+
+        Set n classes.
+        """
+        classes_ = np.unique(y)
+        if all(increment, not (isinstance(self.classes_, None))):
+            self.classes_ = np.unique(np.append(self.classes_, classes_))
+        else:
+            self.classes_ = classes_
+
+    def score(self, X, y):
+        """
+        Util function.
+
+        @todo implement sample_weight parameter
+        """
+        global CFG_PARALLEL
+        y_pred = self.predict(X)
+        acc = None
+        with parallel_backend(**CFG_PARALLEL.get_all_options()):
+            acc = accuracy_score(y, y_pred)
+
+        return acc
+
+    def predict_proba(self, X, **kwargs):
+        if not (estimator_is_fitted(self)):
+            raise RuntimeError("This classifier not is fitted!")
+
+        Xt = adapt_massive_inputs(self, X)
+        flag_lock = Lock()
+        with flag_lock:
+            # k_estimators is ensemble reduced
+            y_pred = predict_ensemble(self.k_estimators_,
+                                      self.feature_names_,
+                                      'predict_proba', Xt, **kwargs)
+
+            y_pred_voting = voting_probabilistic(y_pred)
+
+        return y_pred_voting
+
+
+# -------------------- Functions --------------------
+
+def get_node_ensemble():
+    global NODE_ENSEMBLE
+    return dict(NODE_ENSEMBLE)
+
+
+def make_estimator(estimator_name, package_base_estimator,
+                   **kwargs):
+    """
+    Until function.
+
+    Return a instance of the Decision Tree.
+    """
+    return get_instance_of_class(estimator_name, package_base_estimator,
+                                 **kwargs)
+
+
+def factory_estimators(estimator_name, package_base_estimator,
+                       n_estimators=10, **kwargs):
+    factory_estimators.count = getattr(factory_estimators, 'count', 0)
+    while factory_estimators.count < n_estimators:
+        factory_estimators.count += 1
+
+        yield make_estimator(estimator_name,
+                             package_base_estimator, **kwargs)
+
+
+def train_estimator(estimator, X_train, y_train,
+                    method_train='fit', **kwargs):
+    """
+    Train an estimator from (X_train, y_train) call method indicated.
+
+    This function is projected for parallelism
+    """
+    global CFG_PARALLEL
+
+    flag_lock = Lock()
+    with flag_lock:
+        with parallel_backend(n_jobs=CFG_PARALLEL.n_jobs,
+                              verbose=CFG_PARALLEL.verbose,
+                              backend=CFG_PARALLEL.backend,
+                              prefer=CFG_PARALLEL.prefer,
+                              require=CFG_PARALLEL.require):
+            estimator_fit = call_method_from_instance(estimator, method_train,
+                                                      *[X_train, y_train],
+                                                      **kwargs)
+
+    return estimator if estimator_fit is None else estimator_fit
+
+
+def build_estimator(container, estimator, X, y, seed=100, bootstrap_size=None,
+                    bootstrap_feature_size='auto', sample_n_feature='sqrt-',
+                    sample_strategy='numpy.random.Generator.integers',
+                    method_train='fit', **kwargs):
+    """
+    build_estimator sample data and fit the estimator
+
+    This function is an utility for build in parallel mode
+
+    Args:
+        estimator (_type_): _description_
+        X (_type_): _description_
+        y (_type_): _description_
+        seed (int, optional): _description_. Defaults to 100.
+        bootstrap_size (_type_, optional): _description_. Defaults to None.
+        bootstrap_feature_size (str, optional): _description_. Defaults to 'auto'.
+        sample_n_feature (str, optional): _description_. Defaults to 'sqrt-'.
+        sample_strategy (str, optional): _description_. Defaults to 'numpy.random.Generator.integers'.
+        method_train (str, optional): _description_. Defaults to 'fit'.
+
+    Returns:
+        _type_: _description_
+    """
+    X_train, y_train, features, instances = get_sample_data(
+        X, y, seed, bootstrap_size, bootstrap_feature_size,
+        sample_n_feature, sample_strategy
+    )
+    estimator_ = train_estimator(estimator, X_train, y_train,
+                                 method_train, **kwargs)
+
+    Ei = get_node_ensemble()
+    Ei['estimator'] = estimator_
+    Ei['feature_name'] = features
+    Ei['instances_train'] = instances
+
+    # return (estimator_, features, instances)
+    # return Ei
+    container.append(Ei)
+
+
+def build_ensemble(container, package_base_estimator,
+                   base_estimator, param_estimator, n_estimators,
+                   X, y, seed=100, bootstrap_size=None,
+                   bootstrap_feature_size='auto', sample_n_feature='sqrt-',
+                   sample_strategy='numpy.random.Generator.integers',
+                   method_train='fit', **kwargs):
+    global CFG_PARALLEL
+
+    _ = Parallel(**CFG_PARALLEL.get_all_options())(
+        delayed(build_estimator)(
+            container,
+            e, X, y, seed, bootstrap_size,
+            bootstrap_feature_size, sample_n_feature,
+            sample_strategy, method_train, **kwargs)
+        for e in factory_estimators(
+            base_estimator, package_base_estimator,
+            n_estimators, **param_estimator))
+
+    # return (ensemble, features_train, instances_train)
+    # return ensemble
+
+
+def deprecated_build_ensemble(base_estimator, param_estimator, n_estimators,
+                              X, y, seed=100, bootstrap_size=None,
+                              bootstrap_feature_size='auto',
+                              sample_n_feature='sqrt-',
+                              sample_strategy='numpy.random.Generator.integers',
+                              method_train='fit'):
+    ensemble, features_train, instances_train = [], [], []
+
+    for e in factory_estimators(base_estimator, param_estimator, n_estimators):
+        X_train, y_train, features, instances = get_sample_data(
+            X, y, seed, bootstrap_size, bootstrap_feature_size,
+            sample_n_feature, sample_strategy
+            )
+        ensemble.append(train_estimator(e, X_train, y_train, method_train))
+        features_train.append(features)
+        instances_train.append(instances)
+
+    return (ensemble, features_train, instances_train)
+
+
+def predict_estimator(estimator, features_train, method_predict,
+                      X, **kwargs):
+    global CFG_PARALLEL
+
+    flag_lock = Lock()
+    with flag_lock:
+        y_pred = Parallel(**CFG_PARALLEL.get_all_options())(
+                              delayed(call_method_from_instance)(
+                                  estimator, method_predict, [Xi], **kwargs)
+                              for Xi in np.array_split(
+                                  np.take(X, features_train, axis=1),
+                                  get_n_jobs())
+            )
+    return np.ravel(y_pred)
+
+
+def predict_ensemble(ensemble_fitted, features_fitted, method_predict,
+                     X_test, **kwargs):
+    global CFG_PARALLEL
+
+    flag_lock = Lock()
+    with flag_lock:
+        predictions = Parallel(**CFG_PARALLEL.get_all_options())(
+                                   delayed(predict_estimator)(
+                                       Ei, FFi, method_predict, X_test, **kwargs)
+                                   for Ei, FFi in zip(ensemble_fitted,
+                                                      features_fitted))
+
+        predictions = np.array(predictions, dtype=np.int64)
+        predictions = predictions.T
+
+    return predictions
+
+
+def voting_majority(y_pred):
+    maj = np.apply_along_axis(lambda x: np.bincount(x).argmax(),
+                              axis=1, arr=y_pred)
+
+    return maj
+
+
+def voting_probabilistic(y_pred):
+    med = np.apply_along_axis(lambda x: np.mean(x),
+                              axis=1, arr=y_pred)
+
+    return med

@@ -5,56 +5,112 @@ Created on Fou Nov 15 11:16:35 2023
 
 @author: Danilo Santos
 """
-
-
-from joblib import Parallel, delayed
+import gc
 
 from threading import Lock
 
-import gc
+from collections import deque
 
+from builtins import RuntimeError
+
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.tree import DecisionTreeClassifier
 
-import ensemble 
+from base.dtconfig import DEFAULT_ARGS
+from util import CfgParallelBackend
+from util import adapt_massive_inputs, check_inputs
+from util import estimator_is_fitted
+from ensemble import BaseEnsembleTree
+from ensemble import build_ensemble, predict_ensemble, voting_majority
+from stats import DataStreamMonitorEntropy
+from stats import DivergenceMeasures
+
+if not ("CFG_PARALLEL" in globals()):
+    CFG_PARALLEL = CfgParallelBackend()
+
+if not (gc.isenabled()):
+    gc.enable()
 
 
-class KTreeClassifier(ensemble.RFClassifier):
+class KTreeClassifier(BaseEstimator, ClassifierMixin, BaseEnsembleTree):
     """
-    K Tree Classifier V4 inspired our function entropy-based
+    Research approach with choose base classifier entropy-based
+
     """
-    
-    __slots__ = ['_update_strategy']
-    
-    def __init__(self, update_strategy='entropy', *kwargs):
-        super().__init__(kwargs.get('base_estimator',DecisionTreeClassifier),
-                         kwargs.get('n_estimators',100),
-                         kwargs.get('params_estimators',{'criterion': 'entropy', 'splitter': 'best',
-                                                         'max_depth': None, 'min_samples_split': 2,
-                                                         'min_samples_leaf': 2,
-                                                         'min_weight_fraction_leaf': 0.0,
-                                                         'max_features': 'auto', 'random_state': 100,
-                                                         'max_leaf_nodes': None,
-                                                         'min_impurity_decrease': 0.0,
-                                                         'class_weight': None, 'ccp_alpha': 0.0}),
-                         kwargs.get('seed',100), kwargs.get('voting',"majority"),
-                         kwargs.get('sample_strategy',"numpy.random.Generator.integers").
-                         kwargs.get('sample_bootstrap_size',"auto"),
-                         kwargs.get('sample_n_feature',"sqrt-"),kwargs.get('parallel_n_jobs',-1),
-                         kwargs.get('parallel_verbose',0),
-                         kwargs.get('parallel_backend',"'threading'"),
-                         kwargs.get('parallel_prefer',"threads"),
-                         kwargs.get('parallel_require',None),
-                         kwargs.get('enable_logger',False))
-        self._update_strategy = update_strategy
-    
+
+    __slots__ = ['n_estimators', 'nk_estimators', 'seed',
+                 'window_size', 'kl_threshold', 'base_estimator',
+                 'param_estimator', 'monitor_entropy_',
+                 'data_window', 'divergence_measures']
+
+    def __init__(self, n_estimators=100, k_estimators=25, seed=40,
+                 window_size=200, kl_threshold=0.5,
+                 base_estimator='DecisionTreeClassifier',
+                 param_estimator=DEFAULT_ARGS['dtc'],
+                 divergence_measures=DivergenceMeasures(), **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.n_estimators = n_estimators
+        self.nk_estimators = k_estimators
+        self.seed = seed
+        self.window_size = window_size
+        self.kl_threshold = kl_threshold
+        self.base_estimator = base_estimator
+        self.param_estimator = param_estimator
+        self.monitor_entropy_ = DataStreamMonitorEntropy()
+        self.data_window = deque(maxlen=window_size)
+        self.divergence_measures = divergence_measures
+
     def __del__(self):
-        pass
-    
-    def fit(self, X, y):
-        super().fit(X, y)
-    
-    def predict(self, X):
-        pass
-    
-    def _update_strategy_entropy(self):
+        del self.monitor_entropy_
+
+    def fit(self, X, y, **kwargs):
+        """
+        Util function.
+
+        X -> list of features values
+        y -> label for each X(i)
+
+            parameters: [...]
+        """
+        self.monitor_entropy_.start(X).update(X)
+
+        flag_lock = Lock()
+        with flag_lock:
+            Xt, yt = adapt_massive_inputs(self, X, y)
+            Xt, yt = check_inputs(self, Xt, yt)
+
+            build_ensemble(self.ensemble_, self.package_base_estimator_,
+                           self.base_estimator, self.param_estimator,
+                           self.n_estimators, Xt, yt, self.seed,
+                           self.bootstrap_size_, self.bootstrap_feature_size_,
+                           self.sample_n_feature_, self.sample_strategy_,
+                           self.method_train_, **kwargs)
+
+            #self.ensemble_ = e
+            #self.k_estimators_ = e
+            #self.feature_names_ = f
+            #self.instances_train_ = i
+        gc.collect()
+
+        return self
+
+    def predict(self, X, **kwargs):
+        if not (estimator_is_fitted(self)):
+            raise RuntimeError("This classifier not is fitted!")
+
+        Xt = adapt_massive_inputs(self, X)
+        flag_lock = Lock()
+        with flag_lock:
+            # k_estimators is ensemble reduced
+            y_pred = predict_ensemble(self.k_estimators_,
+                                      self.feature_names_,
+                                      self.method_predict_, Xt, **kwargs)
+
+            y_pred_voting = voting_majority(y_pred)
+
+        return y_pred_voting
+
+    def update(self):
         pass
