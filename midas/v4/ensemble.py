@@ -56,7 +56,7 @@ class RFClassifier(BaseEstimator, ClassifierMixin):
     """
     A simple alternative implementation of the Random Forest algorithm.
 
-    Based in to implementation from the SKLearn.
+    Based in to implementation from the SKLearn, but the paralelism it used abusively
     """
 
     __slots__ = ['_base_estimator', '_estimators', '_n_estimators', '_params',
