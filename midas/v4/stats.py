@@ -220,7 +220,7 @@ class DivergenceMeasures:
 # -------------------- Functions --------------------
 
 def get_sample_data(X, y, seed=100, bootstrap_size=None,
-                    feature_size='auto', sample_feature='sqrt+',
+                    bootstrap_feature_size='auto', sample_n_feature='sqrt+',
                     sample_strategy='numpy.random.Generator.integers'):
     """
     Until function.
@@ -230,35 +230,16 @@ def get_sample_data(X, y, seed=100, bootstrap_size=None,
     flag_lock = Lock()
     with flag_lock:
         n_sample, n_features = np.shape(X)
-        
-        #print('N Sample, N Features: ', n_sample, n_features)
-        #print('Type x: ', type(X))
-        
+        chosen_features = list(range(n_features))
         if bootstrap_size is None:
             bootstrap_size = n_sample
-
-        #print('Bootstrap size: ', bootstrap_size)
-
-        #size_instances = calc_bootstrap_size(bootstrap_size, feature_size)
-        #size_features = get_sample_n_feature(n_features, sample_feature)
-
-        #print('Size instances: ', size_instances,
-        #      'Size features: ', size_features)
-
-        #chosen_features = list(range(n_features))
-        #if (size_features+1) < n_features:
-        #    chosen_features = np.random.choice(chosen_features,
-        #                                      size=size_features,
-        #                                       replace=False)
-        #print('Choosen features: ', chosen_features)
-        
         bootstrap_instance_size = calc_bootstrap_size(bootstrap_size,
-                                                      feature_size)
+                                                      bootstrap_feature_size)
         bootstrap_feature_size = get_sample_n_feature(n_features,
-                                                      sample_feature)
+                                                      sample_n_feature)
         if (bootstrap_feature_size+1) <= n_features:
             chosen_features = random.sample(population=list(range(n_features)),
-                                            k=feature_size)
+                                            k=bootstrap_feature_size)
         else:
             raise ValueError('Number of selected features exceeds dataset size')
         chosen_instances = generate_sample_indices(seed,
