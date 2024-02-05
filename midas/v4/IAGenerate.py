@@ -714,3 +714,10 @@ def calc_bootstrap_size(size, sample_bootstrap_size='auto') -> int:
 # Exemplo de uso
 X, y = np.random.rand(100, 5), np.random.randint(2, size=100)
 get_sample_data(X, y)
+
+
+
+def _bootstrap_sample(self, X_train, y_train):
+        indices = np.random.choice(len(X_train), len(X_train), replace=True)
+        X_train_bootstrap, y_train_bootstrap = X_train[indices], y_train[indices]
+        return X_train_bootstrap, y_train_bootstrap

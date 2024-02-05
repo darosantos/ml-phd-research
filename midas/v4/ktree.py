@@ -25,6 +25,8 @@ from ensemble import build_ensemble, predict_ensemble, voting_majority
 from stats import DataStreamMonitorEntropy
 from stats import DivergenceMeasures
 
+import numpy as np
+
 if not ("CFG_PARALLEL" in globals()):
     CFG_PARALLEL = CfgParallelBackend()
 
@@ -101,12 +103,17 @@ class KTreeClassifier(BaseEstimator, ClassifierMixin, BaseEnsembleTree):
             raise RuntimeError("This classifier not is fitted!")
 
         Xt = adapt_massive_inputs(self, X)
+        print('Shape of X: ', np.shape(X))
         flag_lock = Lock()
         with flag_lock:
             # k_estimators is ensemble reduced
-            y_pred = predict_ensemble(self.k_estimators_,
-                                      self.feature_names_,
+            k_estimators, feature_names, _ = self.get_k_estimators(k='all')
+            #feature_names = list(map(self.get_name_feature_from_key,
+            #                         feature_names))
+            y_pred = predict_ensemble(k_estimators, feature_names,
                                       self.method_predict_, Xt, **kwargs)
+
+            print('Y pred shape: ', np.shape(y_pred))
 
             y_pred_voting = voting_majority(y_pred)
 

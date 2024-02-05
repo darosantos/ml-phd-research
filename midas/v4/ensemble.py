@@ -699,7 +699,7 @@ class BaseEnsembleTree(object):
         self.instances_train_ = []
         self.bootstrap_size_ = kwargs.get('bootstrap_size', None)
         self.bootstrap_feature_size_ = kwargs.get('bootstrap_feature_size', 'auto')
-        self.sample_n_feature_ = kwargs.get('sample_n_feature', 'sqrt-')
+        self.sample_n_feature_ = kwargs.get('sample_n_feature', 'sqrt+')
         self.sample_strategy_ = kwargs.get('sample_strategy',
                                            'numpy.random.Generator.integers')
         self.package_base_estimator_ = kwargs.get('package_base_estimator_',
@@ -709,18 +709,28 @@ class BaseEnsembleTree(object):
 
     def get_k_estimators(self, k='all'):
         if str(k).lower() == 'all':
-            self.get_all_estimators_()
+            return self.get_all_estimators_()
         else:
             raise ValueError('Not implemeted k extraction')
 
     def get_all_estimators_(self):
         global CFG_PARALLEL
+        estimator, features, train = None, None, None
         flag_lock = Lock()
         with flag_lock:
-            k_estimators = Parallel(**CFG_PARALLEL.get_all_options())(
+            estimator = Parallel(**CFG_PARALLEL.get_all_options())(
                                         delayed(lambda ei: ei['estimator'])(e)
                                         for e in self.ensemble_)
-        return k_estimators
+            features = Parallel(**CFG_PARALLEL.get_all_options())(
+                                        delayed(lambda ei: ei['feature_name'])(e)
+                                        for e in self.ensemble_)
+            train = Parallel(**CFG_PARALLEL.get_all_options())(
+                                        delayed(lambda ei: ei['instances_train'])(e)
+                                        for e in self.ensemble_)
+        return estimator, features, train
+
+    def get_name_feature_from_key(self, keys):
+        return [self.feature_names_[k] for k in keys]
 
     def match_features(self, index_estimator):
         features_train_ = self.ensemble_[index_estimator]['feature_name']
@@ -919,7 +929,7 @@ def predict_estimator(estimator, features_train, method_predict,
     with flag_lock:
         y_pred = Parallel(**CFG_PARALLEL.get_all_options())(
                               delayed(call_method_from_instance)(
-                                  estimator, method_predict, [Xi], **kwargs)
+                                  estimator, method_predict, *[Xi], **kwargs)
                               for Xi in np.array_split(
                                   np.take(X, features_train, axis=1),
                                   get_n_jobs())
@@ -935,7 +945,8 @@ def predict_ensemble(ensemble_fitted, features_fitted, method_predict,
     with flag_lock:
         predictions = Parallel(**CFG_PARALLEL.get_all_options())(
                                    delayed(predict_estimator)(
-                                       Ei, FFi, method_predict, X_test, **kwargs)
+                                       Ei, FFi, method_predict,
+                                       X_test, **kwargs)
                                    for Ei, FFi in zip(ensemble_fitted,
                                                       features_fitted))
 
